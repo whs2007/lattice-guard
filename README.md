@@ -196,6 +196,49 @@ HIFOX_RUNTIME_CMD="claude -p --dangerously-skip-permissions" node src/main.ts ru
 
 阶段超时会通过 `AbortSignal` 传给 Runtime；`CliRuntime` 收到后 `SIGKILL` 子进程，不留孤儿。模型进程非零退出（额度用尽、鉴权失败）不会被当成阶段错误，但会把退出码与 stderr 尾部写进日志，避免把「模型根本没跑起来」误诊成「产物没写」。
 
+## 零成本跑真实模型
+
+Claude 账号 `402 Insufficient Balance` 之后，这条链还能靠**厂商官方免费档**继续跑，不需要充值，也不需要去捡别人泄露的 Key。
+
+### 先避开一个流传很广的错配
+
+网上大量文章说「把 `ANTHROPIC_BASE_URL` 指到 Groq / Gemini 就能白嫖 Claude Code」。**不成立**：Claude Code 官方网关文档写明该变量只接受 Anthropic Messages 格式（`/v1/messages`），而 Groq / 智谱 / OpenRouter 是 OpenAI 格式。直接指过去会失败，中间必须加协议转换网关（Claude Code Router、LiteLLM 一类）。
+
+### 现成可用的组合
+
+| 路线 | 免费额度（2026-11 查证） | 要信用卡 | 本项目接入 |
+|---|---|---|---|
+| **Gemini API Key**（推荐） | 免费档每日数百次请求，Flash 系模型；无需信用卡 | 否 | `scripts/runtime-gemini.mjs` 已写好，一行环境变量 |
+| Gemini CLI + Google 账号 OAuth | 1,000 次/天，免 Key | 否 | **不适用**：headless 下 Y/n 确认会抢走 stdin（实测认证被取消） |
+| Groq | 约 1,000 次/天 | 否 | 需另接 OpenAI 格式的 agent CLI |
+| 智谱 GLM Flash / 硅基流动 | 免费模型，国内直连 | 否 | 同上 |
+| OpenRouter `:free` 模型 | 50 次/天（充过 $10 后 1,000/天） | 否 | 同上，但额度偏紧 |
+
+本机实测这些域名都可达（`401/403` 表示链路通、只是缺鉴权）：`generativelanguage.googleapis.com`、`api.groq.com`、`openrouter.ai`、`open.bigmodel.cn`、`api.siliconflow.cn`。
+
+### 接法
+
+去 https://aistudio.google.com/apikey 用 Google 账号生成一个免费 Key，然后：
+
+```bash
+export GEMINI_API_KEY="你的免费key"
+export HIFOX_RUNTIME_CMD="node scripts/runtime-gemini.mjs"
+node src/main.ts run --ws tasks/HF-14690 --runtime cli
+```
+
+引擎一行没改：`CliRuntime` 仍把完整上下文写到 stdin，只多传了一个 `HIFOX_WS`（工作区绝对路径）。适配器负责：
+
+- 长 prompt 走 stdin（`gemini -p` 会把 stdin 追加到参数后），避开 Windows 命令行长度上限；
+- 用 `--include-directories $HIFOX_WS` 挂上工作区——**否则产物会被写进 repo 根目录**，产物校验器永远找不到；
+- `--yolo` 自动批准写文件与 git；
+- 把 Gemini CLI 的「鉴权失败却退出码 0」翻成非零退出，避免额度耗尽伪装成「产物不齐」。
+
+可选：`HIFOX_GEMINI_MODEL=gemini-2.5-flash` 固定模型，省掉内部路由的额外请求。
+
+一轮完整链大约几十次模型请求，免费日额度够跑好几轮。**注意免费档通常允许厂商用提示词改进产品**，别把私有代码或客户数据喂进去。
+
+> 状态：适配器的参数解析、stdin 传递、网络链路已用无效 Key 验证过（`400 API_KEY_INVALID` 出现在预期位置）。**尚未用有效 Key 跑完整条链**，所以免费档能不能走完提测七步，仍属未验证。
+
 ## 已知限制
 
 - **Mock Runtime 不会思考**。它按 `examples/demo-task.json` 里的补丁落点确定性地产出产物与代码改动；产物的文件路径、行号、符号名、提交历史全部来自真实仓库检索，但它对「根因」的表述仍是模板化的。用途是验证纪律，不是验证智能。

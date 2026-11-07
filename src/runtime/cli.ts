@@ -77,6 +77,10 @@ export class CliRuntime implements Runtime {
           ...process.env,
           GIT_AUTHOR_NAME: `${ctx.trigger} & ${CFG.AGENT_NAME}`,
           GIT_AUTHOR_EMAIL: `${CFG.AGENT_SLUG}@hifox.local`,
+          // 子进程的 cwd 是仓库，而产物在工作区。把工作区绝对路径显式传下去，
+          // 适配器才知道要把哪个目录挂给 CLI（Claude Code 用 --add-dir，
+          // Gemini CLI 用 --include-directories）。不传就只能靠模型猜路径。
+          HIFOX_WS: ctx.ws,
         },
       });
       let out = '';

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: 验收 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 这个项目零依赖：没有 npm install 这一步，装上 Node 就能跑
+      - name: 单元测试
+        run: node --test tests/unit.test.mjs
+
+      - name: 端到端跑一次
+        run: node src/main.ts demo
+
+      - name: 19 条验收断言
+        run: node scripts/verify-day1.mjs

@@ -19,7 +19,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PLACEHOLDER/lattice-guard.git"
+    "url": "https://github.com/whs2007/lattice-guard.git"
   },
   "keywords": [
     "ai-agent",
@@ -29,5 +29,9 @@
     "code-review",
     "typescript",
     "nodejs"
-  ]
+  ],
+  "bugs": {
+    "url": "https://github.com/whs2007/lattice-guard/issues"
+  },
+  "homepage": "https://github.com/whs2007/lattice-guard#readme"
 }

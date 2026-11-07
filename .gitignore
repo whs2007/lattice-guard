@@ -1,0 +1,11 @@
+node_modules/
+
+# 运行时产物：任务工作区与临时目录都不进仓库
+tasks/
+tmp/
+
+# 示例仓库在被引导时会自建 git 基线，源目录不应带版本库
+examples/demo-repo/.git
+
+*.log
+.DS_Store

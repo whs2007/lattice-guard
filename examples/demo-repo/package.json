@@ -1,0 +1,10 @@
+{
+  "name": "demo-virtual-list",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "演示仓库：清理构建缓存弹窗的列表可视区间计算（带一个真实缺陷）",
+  "scripts": {
+    "test": "node --test"
+  }
+}

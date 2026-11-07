@@ -1,0 +1,31 @@
+{
+  "title": "清理构建缓存弹窗，列表无法滚动",
+  "description": "打开「设置 → 存储 → 清理构建缓存」弹窗后，缓存条目列表无法滚动，最后 3 条内容不可达，用户无法勾选。期望：列表能滚到底，最后一条可见。",
+  "space": "产品空间",
+  "type": "缺陷",
+  "priority": "普通",
+  "labels": ["bugfix", "desktop", "virtual-list"],
+  "base_branch": "develop",
+  "test_cmd": "node --test",
+  "review_blocking_rounds": 1,
+  "custom_fields": {
+    "需求细节": "用户反馈：弹窗里列表卡住不动，最后三条缓存条目勾不到。",
+    "代码状态": "开发中"
+  },
+  "patch_ops": [
+    {
+      "file": "src/virtualList.js",
+      "find": "  const start = 0;",
+      "replace": "  const start = Math.floor(scrollTop / rowHeight);",
+      "note": "让滚动偏移参与起始行计算",
+      "phase": "implement"
+    },
+    {
+      "file": "src/virtualList.js",
+      "find": "  const start = Math.floor(scrollTop / rowHeight);",
+      "replace": "  const start = Math.min(\n    Math.floor(scrollTop / rowHeight),\n    Math.max(0, total - Math.ceil(viewportHeight / rowHeight)),\n  );",
+      "note": "把起始行夹取回合法范围，滚过头时不会 start > end",
+      "phase": "patch"
+    }
+  ]
+}

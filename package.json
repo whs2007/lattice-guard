@@ -1,0 +1,33 @@
+{
+  "name": "lattice-guard",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "给 AI 编码 Agent 用的纪律引擎：阶段状态机 + 四道闸，让「完成」变成第三方可复算的结论",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "init": "node src/main.ts init",
+    "drive": "node src/main.ts run --wait 0",
+    "status": "node src/main.ts status",
+    "serve": "node src/main.ts serve --port 4173",
+    "demo": "node src/main.ts demo",
+    "dev": "node src/main.ts dev --reset",
+    "verify": "node scripts/verify-day1.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PLACEHOLDER/lattice-guard.git"
+  },
+  "keywords": [
+    "ai-agent",
+    "state-machine",
+    "guardrails",
+    "agentic-workflow",
+    "code-review",
+    "typescript",
+    "nodejs"
+  ]
+}

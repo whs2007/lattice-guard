@@ -1,5 +1,7 @@
 # lattice-guard · 给 AI 编码 Agent 用的纪律引擎
 
+[![CI](https://github.com/whs2007/lattice-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/whs2007/lattice-guard/actions/workflows/ci.yml)
+
 > 让「完成」从一句自述，变成一个第三方可以复算的结论。
 
 源自对 HiFox「狄仁杰」单 Agent 缺陷修复案例的反向工程：依据官方文档（`help.hifox.com/docs`）、真实生产 Agent 配置（`vin568/hifox-configuration`）与公开分享资料，把它重写成**可运行、可验收、可对拍**的实现。
@@ -163,6 +165,9 @@ tasks/HF-14690/   一次运行的全部痕迹（账本、产物、events.jsonl�
 单元测试：16 通过 / 0 未通过
 demo 连跑三次：均到「阶段: 完成」
 ```
+
+上面这组数字不是本机一次性的截图：CI 每次提交都会在 **Ubuntu 与 Windows** 上重新跑一遍（见徽章），
+并且「全新克隆能否直接跑」本身也是验证过的——干净目录里 `git clone` 后直接 `node src/main.ts demo` 即到终态。
 
 ## 接真实模型
 

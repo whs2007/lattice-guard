@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { resolveCommand } from './exe.ts';
 import type { ResolvedTarget } from './exe.ts';
 import { parseDecisionSheet } from '../decisions.ts';
@@ -23,6 +23,9 @@ import type { Runtime, RuntimeCtx } from './types.ts';
  *   上限 1 次，补齐后仍不合格就照旧 BAD_OUTPUT → PAUSED，纪律没有被放宽。
  * - 实现/修补阶段还要求改动**已提交**：提测第一步 merge 只认提交。
  */
+/** 项目根：`src/runtime/` 往上两级。子进程 cwd 是 <ws>/repo，相对脚本路径在那里解析不到。 */
+const PROJECT_ROOT = resolve(import.meta.dirname, '../..');
+
 export class CliRuntime implements Runtime {
   name: string;
   private target: ResolvedTarget;
@@ -30,7 +33,16 @@ export class CliRuntime implements Runtime {
   repairRounds = Number(process.env.HIFOX_REPAIR_ROUNDS ?? '1');
 
   constructor(cmd = process.env.HIFOX_RUNTIME_CMD ?? '') {
-    const argv = cmd.split(/\s+/).filter(Boolean);
+    const argv = cmd.split(/\s+/).filter(Boolean).map((a, i) => {
+      // 凡是指向项目内真实脚本的相对路径（如 `node scripts/runtime-gemini.mjs`），
+      // 统一改成绝对路径。否则子进程的 cwd 是仓库，node 会报 MODULE_NOT_FOUND，
+      // 而错误信息只显示「产物不齐」，看起来像模型没写文件。
+      if (i > 0 && !isAbsolute(a) && /\.(?:mjs|cjs|js|ts)$/.test(a)) {
+        const abs = resolve(PROJECT_ROOT, a);
+        if (existsSync(abs)) return abs;
+      }
+      return a;
+    });
     if (argv.length === 0) {
       throw new ToolError('未配置 HIFOX_RUNTIME_CMD，无法使用 cli runtime', '例如 HIFOX_RUNTIME_CMD="claude -p"');
     }
@@ -43,10 +55,11 @@ export class CliRuntime implements Runtime {
     const prompt = readText(ctx.promptPath);
     ctx.log(`runtime ${this.name}：${this.target.how}`);
 
-    await this.invoke(ctx, prompt);
+    // 第一次调用的退出信息也要留着：如果 repairRounds=0 或补齐也没救回来，
+    // PAUSED 的原因必须带上「子进程其实崩了」，而不是只说产物不齐。
+    let last = await this.invoke(ctx, prompt);
 
     let defects = this.stageDefects(ctx, stage);
-    let last: { code: number; err: string } = { code: 0, err: '' };
     for (let round = 1; round <= this.repairRounds && defects.length > 0; round++) {
       ctx.log(`产物不合格（${defects.join('；')}）→ 同阶段内补齐第 ${round} 次`);
       last = await this.invoke(ctx, `${prompt}\n\n${repairBlock(defects)}`);

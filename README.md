@@ -17,7 +17,7 @@
 ```bash
 node src/main.ts demo         # 端到端跑完一次：诊断 → 门1 → 实现 → 评审(阻断) → 修补 → 验证 → 门2 → 提测七步 → 完成
 node src/main.ts verify       # 19 条验收断言（门禁 12 条 + 一致性/证据/交付 7 条）
-node --test tests/*.test.mjs  # 16 条单元测试
+node --test tests/*.test.mjs  # 17 条单元测试
 ```
 
 想看界面、自己发令牌：
@@ -96,7 +96,7 @@ examples/
 scripts/
   verify-day1.mjs 19 条验收断言
 tests/
-  unit.test.mjs   16 条单元测试
+  unit.test.mjs   17 条单元测试
 tasks/HF-14690/   一次运行的全部痕迹（账本、产物、events.jsonl、run.log、repo 工作副本）
 ```
 
@@ -162,7 +162,7 @@ tasks/HF-14690/   一次运行的全部痕迹（账本、产物、events.jsonl�
 场景 E · 交付真实性          ⑲       全绿（改了没提交 → 不可交付）
 结果：19 通过 / 0 未通过
 
-单元测试：16 通过 / 0 未通过
+单元测试：17 通过 / 0 未通过
 demo 连跑三次：均到「阶段: 完成」
 ```
 
@@ -204,21 +204,65 @@ Claude 账号 `402 Insufficient Balance` 之后，这条链还能靠**厂商官�
 
 网上大量文章说「把 `ANTHROPIC_BASE_URL` 指到 Groq / Gemini 就能白嫖 Claude Code」。**不成立**：Claude Code 官方网关文档写明该变量只接受 Anthropic Messages 格式（`/v1/messages`），而 Groq / 智谱 / OpenRouter 是 OpenAI 格式。直接指过去会失败，中间必须加协议转换网关（Claude Code Router、LiteLLM 一类）。
 
+### 先确认网络：这台机器的实测结果（2026-11-07）
+
+**连通性是会变的**，别照着旧结论直接跑长链。代理与直连各测一次：
+
+| 端点 | 走代理 | 直连 | 结论 |
+|---|---|---|---|
+| `open.bigmodel.cn` | 401 / 0.16s | 401 / 0.14s | ✅ 可用（401 = 只差 Key） |
+| `api.siliconflow.cn` | 401 / 0.22s | 401 / 0.22s | ✅ 可用 |
+| `openrouter.ai` | 200 / 7.0s | 200 / 4.2s | ✅ 可用，但慢 |
+| `api.groq.com` | 403 | 403 | ⚠️ TCP 通，被 WAF 挡 |
+| `generativelanguage.googleapis.com` | 000 | 000 | ❌ 完全不通 |
+| `api.mistral.ai` | 000 | 000 | ❌ 完全不通 |
+
+跑之前花 10 秒预检一次：
+
+```bash
+curl -sS -m 10 -o /dev/null -w "%{http_code}\n" https://open.bigmodel.cn/api/paas/v4/models
+# 401/403/200 都说明链路通；000 或超时就换厂商或修代理
+```
+
 ### 现成可用的组合
 
-| 路线 | 免费额度（2026-11 查证） | 要信用卡 | 本项目接入 |
+| 路线 | 免费额度（以厂商页面为准） | 要信用卡 | 本项目接入 |
 |---|---|---|---|
-| **Gemini API Key**（推荐） | 免费档每日数百次请求，Flash 系模型；无需信用卡 | 否 | `scripts/runtime-gemini.mjs` 已写好，一行环境变量 |
+| **智谱 GLM Flash**（推荐） | 免费模型，国内直连 | 否 | `scripts/runtime-openai.mjs`，无需装任何 CLI |
+| 硅基流动 | 部分模型免费 | 否 | 同上，换 `HIFOX_OPENAI_BASE` / `MODEL` |
+| OpenRouter `:free` | 约 50 次/天 | 否 | 同上，额度偏紧、延迟高 |
+| Groq | 约 1,000 次/天 | 否 | 同上，但本机 403 |
+| Gemini API Key | 免费档每日数百次 | 否 | `scripts/runtime-gemini.mjs`，**这台机器当前端点不通** |
 | Gemini CLI + Google 账号 OAuth | 1,000 次/天，免 Key | 否 | **不适用**：headless 下 Y/n 确认会抢走 stdin（实测认证被取消） |
-| Groq | 约 1,000 次/天 | 否 | 需另接 OpenAI 格式的 agent CLI |
-| 智谱 GLM Flash / 硅基流动 | 免费模型，国内直连 | 否 | 同上 |
-| OpenRouter `:free` 模型 | 50 次/天（充过 $10 后 1,000/天） | 否 | 同上，但额度偏紧 |
 
-本机实测这些域名都可达（`401/403` 表示链路通、只是缺鉴权）：`generativelanguage.googleapis.com`、`api.groq.com`、`openrouter.ai`、`open.bigmodel.cn`、`api.siliconflow.cn`。
+### 路线 A：OpenAI 兼容端点（推荐 · 当前链路可达）
 
-### 接法
+在厂商控制台拿一个免费 Key（智谱 https://bigmodel.cn/usercenter/apikeys 、硅基流动、或 OpenRouter），然后：
 
-去 https://aistudio.google.com/apikey 用 Google 账号生成一个免费 Key，然后：
+```bash
+export HIFOX_OPENAI_KEY="你的免费key"
+export HIFOX_RUNTIME_CMD="node scripts/runtime-openai.mjs"
+node src/main.ts run --ws tasks/HF-14690 --runtime cli
+
+# 换厂商时同时改 BASE 和 MODEL，例如 OpenRouter
+export HIFOX_OPENAI_BASE="https://openrouter.ai/api/v1"
+export HIFOX_OPENAI_MODEL="meta-llama/llama-3.1-8b-instruct:free"
+```
+
+`runtime-openai.mjs` 零依赖，只用 Node 原生 `fetch`：把 stdin 的 12 块上下文作为 user 消息，交给 `/chat/completions`，暴露 `read_file` / `write_file` / `run_cmd` 三个工具，循环到模型不再调用工具为止。
+
+刻意的边界：
+
+- **文件只能写进仓库或 `HIFOX_WS`**，绝对路径与 `../` 逃逸都挡掉；
+- **模型说「完成」不算完成**，退出后仍由引擎的产物校验器裁决；
+- **任何 401/402/429/网络错误立即非零退出**，不静默重试；引擎会把退出码与 stderr 尾部写进 PAUSED 原因；
+- 子进程里的相对脚本路径由 `CliRuntime` 自动按项目根绝对化（子进程 cwd 是 `<ws>/repo`，写相对路径会 `MODULE_NOT_FOUND`）。
+
+> 已验证到哪一步：无 Key / 假 Key 打智谱与 OpenRouter 都在 **1 秒内**返回明确的 401，引擎 `PAUSED` 的原因直接带上「令牌已过期」，不伪装成产物问题。**尚未用有效 Key 跑完整条链**——免费档能不能走完提测七步，仍缺实测证据。
+
+### 路线 B：Gemini API Key（换网络后才可用）
+
+去 https://aistudio.google.com/apikey 生成免费 Key，然后：
 
 ```bash
 export GEMINI_API_KEY="你的免费key"
@@ -226,18 +270,11 @@ export HIFOX_RUNTIME_CMD="node scripts/runtime-gemini.mjs"
 node src/main.ts run --ws tasks/HF-14690 --runtime cli
 ```
 
-引擎一行没改：`CliRuntime` 仍把完整上下文写到 stdin，只多传了一个 `HIFOX_WS`（工作区绝对路径）。适配器负责：
+适配器把长 prompt 走 stdin（`gemini -p` 会把 stdin 追加到参数后），用 `--include-directories $HIFOX_WS` 挂上工作区（**否则产物会被写进 repo 根目录**），`--yolo` 自动批准写文件与 git。可选 `HIFOX_GEMINI_MODEL=gemini-2.5-flash` 跳过内部路由那次额外请求。
 
-- 长 prompt 走 stdin（`gemini -p` 会把 stdin 追加到参数后），避开 Windows 命令行长度上限；
-- 用 `--include-directories $HIFOX_WS` 挂上工作区——**否则产物会被写进 repo 根目录**，产物校验器永远找不到；
-- `--yolo` 自动批准写文件与 git；
-- 把 Gemini CLI 的「鉴权失败却退出码 0」翻成非零退出，避免额度耗尽伪装成「产物不齐」。
+两个实测踩出来的坑都处理了：Gemini CLI 鉴权失败时**退出码仍是 0**；网络不通时它打印 `fetch failed sending request` 后**无限退避重试，进程不退出**。现在边读 stderr 边判定，遇到不可恢复错误立刻杀进程树并非零退出（Windows `shell:true` 下只 `child.kill()` 杀不掉子进程树，必须 `taskkill /T /F`），另有 `HIFOX_ADAPTER_TIMEOUT_SEC`（默认 180s）兜底。
 
-可选：`HIFOX_GEMINI_MODEL=gemini-2.5-flash` 固定模型，省掉内部路由的额外请求。
-
-一轮完整链大约几十次模型请求，免费日额度够跑好几轮。**注意免费档通常允许厂商用提示词改进产品**，别把私有代码或客户数据喂进去。
-
-> 状态：适配器的参数解析、stdin 传递、网络链路已用无效 Key 验证过（`400 API_KEY_INVALID` 出现在预期位置）。**尚未用有效 Key 跑完整条链**，所以免费档能不能走完提测七步，仍属未验证。
+一轮完整链大约几十次请求，免费日额度够跑好几轮。**免费档通常允许厂商用提示词改进产品**，别把私有代码或客户数据喂进去。
 
 ## 已知限制
 

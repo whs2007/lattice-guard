@@ -21,7 +21,7 @@
  *   HIFOX_GEMINI_MODEL   指定模型（默认由 Gemini CLI 自己选）
  *   HIFOX_GEMINI_BIN     覆盖启动命令（默认 npx -y @google/gemini-cli）
  */
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const chunks = [];
 for await (const c of process.stdin) chunks.push(c);
@@ -52,24 +52,59 @@ const child = spawn(exe, argv, {
   env: process.env,
 });
 
-// 实测：Gemini CLI 在「API key 无效 / 额度耗尽」时会报一大段错误但退出码仍是 0。
-// 引擎只看退出码，于是这类失败会被误读成「模型正常跑完、只是产物没写」。
-// 这里把可识别的致命鉴权/配额错误翻成非零退出码，让 PAUSED 的原因说人话。
+// 实测两类坑：
+// ① Gemini CLI 在「API key 无效 / 额度耗尽」时报错一大段却仍以 0 退出，
+//    引擎只看退出码，会把「模型根本没跑」误读成「产物没写」。
+// ② 网络不通时它打印 `fetch failed sending request` 后无限退避重试，
+//    进程一直不退出 → 上面那类检查永远没机会执行，白等引擎的 900 秒超时。
+// 所以：边读边判定，遇到不可恢复的错误立刻收进程；再加一道硬超时兜底。
 let stderr = '';
-const FATAL = /API key not valid|RESOURCE_EXHAUSTED|quota exceeded|rate.?limit|\b429\b|\b401\b|\b402\b|credential/i;
+let fatalReason = '';
+let hardTimer;
+const FATAL_INSTANT = /API key not valid|API_KEY_INVALID|RESOURCE_EXHAUSTED|quota exceeded|fetch failed sending request|ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT/i;
+const LIMIT_SEC = Number(process.env.HIFOX_ADAPTER_TIMEOUT_SEC ?? '180');
+
+// 注意：Windows 上用了 shell:true，`child.kill()` 只杀 cmd.exe，
+// Gemini 子进程会留下来继续重试，管道不关 → `close` 永不触发 → 适配器又挂死。
+// 所以放弃等待 close，直接杀整棵进程树并立刻退出。
+const giveUp = (why) => {
+  if (fatalReason) return;
+  fatalReason = why;
+  clearTimeout(hardTimer);
+  console.error(`[runtime-gemini] ${why}；按非零退出码上报`);
+  try {
+    if (win && child.pid) {
+      spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      child.kill('SIGKILL');
+    }
+  } catch { /* 进程已经退出 */ }
+  process.exit(1);
+};
+
+hardTimer = setTimeout(
+  () => giveUp(`适配器 ${LIMIT_SEC}s 内没有得到有效响应（网络或额度问题）`),
+  LIMIT_SEC * 1000,
+);
+
 child.stderr.on('data', (d) => {
   const s = String(d);
   stderr += s;
   process.stderr.write(s);
+  if (FATAL_INSTANT.test(stderr)) giveUp('检测到不可恢复的鉴权 / 配额 / 网络错误，停止无意义重试');
 });
 
 child.stdin.end(prompt);
 child.on('error', (e) => {
+  clearTimeout(hardTimer);
   console.error(`[runtime-gemini] 启动失败：${e.message}`);
   process.exitCode = 127;
 });
 child.on('close', (code) => {
-  const fatal = code === 0 && FATAL.test(stderr);
-  if (fatal) console.error('[runtime-gemini] 检测到鉴权/配额失败，按非零退出码上报');
-  process.exit(fatal ? 1 : (code ?? 1));
+  clearTimeout(hardTimer);
+  if (fatalReason) process.exit(1);
+  // 进程以 0 退出但 stderr 里有 401/402/429，同样翻成失败
+  const silentFatal = code === 0 && /\b401\b|\b402\b|\b429\b|credential|rate.?limit/i.test(stderr);
+  if (silentFatal) console.error('[runtime-gemini] 鉴权/配额失败却退出码 0，按非零上报');
+  process.exit(silentFatal ? 1 : (code ?? 1));
 });

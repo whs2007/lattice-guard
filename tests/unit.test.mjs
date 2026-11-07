@@ -174,3 +174,14 @@ test('「改动可交付」判据：有提交且干净才算数', async () => {
   assert.equal(commitsAhead(repo, 'develop'), 1);
   assert.equal(assertDeliverable(repo, 'develop').ok, true);
 });
+
+test('CliRuntime 把项目内相对脚本路径绝对化（子进程 cwd 是 <ws>/repo）', async () => {
+  const { isAbsolute } = await import('node:path');
+  const { existsSync } = await import('node:fs');
+  const { CliRuntime } = await import('../src/runtime/cli.ts');
+  const rt = new CliRuntime('node scripts/runtime-openai.mjs');
+  const script = rt.target.args.find((a) => a.endsWith('runtime-openai.mjs'));
+  assert.ok(script, '脚本参数应保留');
+  assert.ok(isAbsolute(script), `相对脚本必须绝对化，实际：${script}`);
+  assert.ok(existsSync(script), '绝对化后的脚本必须真实存在');
+});

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { CFG } from './config.ts';
 import { ToolError } from './errors.ts';
 
@@ -35,8 +36,20 @@ export function mustGit(cwd: string, args: string[], env: Record<string, string>
   return r.stdout;
 }
 
+/**
+ * 判断 dir 自身是不是仓库根。
+ * 不能用 `rev-parse --git-dir`：它向上查找，会把「仓库里的某个普通子目录」误判成仓库。
+ * 这个误判有真实后果——把示例仓库放进本仓库再提交后，新克隆者会以为
+ * examples/demo-repo 自带 .git，于是走 clone 路径并失败。
+ */
 export function isGitRepo(dir: string): boolean {
-  return existsSync(`${dir}/.git`) || git(dir, ['rev-parse', '--git-dir']).ok;
+  if (existsSync(`${dir}/.git`)) return true;
+  const r = git(dir, ['rev-parse', '--show-toplevel']);
+  if (!r.ok) return false;
+  const norm = (p: string) => resolve(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  const a = norm(r.stdout.trim());
+  const b = norm(dir);
+  return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 export function currentBranch(repo: string): string {
